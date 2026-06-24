@@ -1,17 +1,56 @@
-# 2dimg2motion
+<div align="center">
 
-将一张静态 2D 角色/物体图片，通过 AI 图像生成转化为一致的透明背景游戏动画序列帧。
+# 2dimg2motion.skill
 
-Turn one baseline 2D character, creature, or prop image into consistent transparent game-animation frames through whole-character key-pose redraw and reference-guided in-betweens.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-Standard-green)](https://agentskills.io)
+[![Multi-Runtime](https://img.shields.io/badge/Runtime-ClaudeCode%20·%20Codex-blueviolet)]()
+
+
+<br>
+
+**2dimg2motion.skill--将一张静态 2D 角色/物体图片，通过 AI 图像生成转化为一致的透明背景游戏动画序列帧。**
+
+<br>
+
+Turn one baseline 2D character, creature, or prop image into consistent transparent<br>
+game-animation frames through whole-character key-pose redraw<br>
+  and reference-guided in-betweens.
+
+
+</div>
+
+---
+
 
 
 ## 示例 / Examples
 
-| 示例 / Example | 基准图 / Input | 动画预览 / Preview | 14 帧精灵表 / Sprite Sheet |
-|---|---|---|---|
-| 双拳重砸 / Ground Smash | <img src="examples/s1.png" width="160" alt="Rock golem input"> | <img src="examples/s1res.gif" width="240" alt="Ground-smash animation preview"> | <img src="examples/s1res.png" width="420" alt="Ground-smash 14-frame sprite sheet"> |
-| 甲壳生物行走 / Creature Walk | <img src="examples/s2.png" width="160" alt="Armored creature input"> | <img src="examples/s2res.gif" width="240" alt="Walk-cycle animation preview"> | <img src="examples/s2res.png" width="420" alt="Walk-cycle 14-frame sprite sheet"> |
 
+<table>
+  <tr>
+    <th>示例 / Example</th>
+    <th>基准图 / Input</th>
+    <th>动画预览 / Preview</th>
+  </tr>
+  <tr>
+    <td>双拳重砸 / Ground Smash</td>
+    <td><img src="examples/s1.png" width="160" alt="Rock golem input"></td>
+    <td><img src="examples/s1res.gif" width="240" alt="Ground-smash animation preview"></td>
+  </tr>
+  <tr>
+    <td colspan = "3"><img src="examples/s1res.png" width="1200" alt="Ground-smash 14-frame sprite sheet"></td>
+  </tr>
+  <tr>
+    <td>甲壳生物行走 / Creature Walk</td>
+    <td><img src="examples/s2.png" width="160" alt="Armored creature input"></td>
+    <td><img src="examples/s2res.gif" width="240" alt="Ground-smash animation preview"></td>
+  </tr>
+  <tr>
+    <td colspan = "3"><img src="examples/s2res.png" width="1200" alt="Ground-smash 14-frame sprite sheet"></td>
+  </tr>
+</table>
 
 ## 这是什么 / What This Is
 
