@@ -1,81 +1,81 @@
-# 整角色关键姿势重绘
+# Whole-Character Key-Pose Redraw
 
-当动作需要大幅轮廓变化、明显遮挡、挤压拉伸、透视或缩短变形时，使用这一路径。此类动作无法靠旋转刚性切片干净表达，应该由内置 `image_gen` 重绘完整角色。
+Use this path when an action requires large silhouette changes, heavy overlap, squash/stretch, perspective, or foreshortening. These motions cannot be expressed cleanly by rotating rigid cutouts; built-in `image_gen` should redraw the complete character.
 
-关键帧和补间帧必须来自模型图像生成。不要用脚本、Pillow、OpenCV、canvas、SVG、骨骼切片、仿射变换或程序化插值生产动作图；本地脚本只允许做色键移除、拆图、打包、预览、manifest 和验证。
+Keyframes and in-betweens must come from model image generation. Do not use scripts, Pillow, OpenCV, canvas, SVG, bone slicing, affine transforms, or procedural interpolation to produce motion artwork. Local scripts are allowed only for chroma-key removal, splitting, packing, previews, manifests, and validation.
 
-## 0. 失败复盘硬约束
+## 0. Hard Failure Constraints
 
-以下情况必须拒绝该批次并重新调用 `image_gen`：
+Reject the batch and call `image_gen` again if any of the following occurs:
 
-- 武器或主动手换侧：提示词必须锁定 `weaponHand` 和 `emptyHand`，例如“screen-right sword hand remains the sword hand in every frame；screen-left hand remains empty/counterbalance”。如果剑、棍、枪、法杖等武器换到另一只手，直接重生。
-- 色键与主体冲突：生成前先根据主体主色选择色键。绿色/蓝色主体优先 `#ff00ff`；粉色/紫色/洋红主体不要用 `#ff00ff`，优先 `#00ffff` 或其他不在主体内的纯色。抠图后身体、武器、眼睛、护甲、角、牙齿或描边被透明化，必须换色键重生。
-- 格距不足：sprite strip 必须要求大色键 gutter、每格居中、完整武器入格、不得互相接触。等分拆格会切主体或产生邻格碎片时，不要交付；改用更大间距或分批生成短 strip。
-- 画布不足：武器尖端、角、耳朵、脚、尾巴贴边或裁切时，扩大最终画布或重生，不要把裁切结果硬交付。
-- 验证通过但视觉失败：结构验证不是美术验收。必须检查 `contact-sheet.png` 和 `preview.gif`，确认无换手、无切割、无缺色、无残片、无比例跳变。
-- 输出污染：最终目录只保留契约产物；模型源图、透明源图、失败稿和临时拆分稿必须放临时目录并在交付前清理。
+- Weapon or active hand swaps sides: prompts must lock `weaponHand` and `emptyHand`, for example `screen-right sword hand remains the sword hand in every frame; screen-left hand remains empty/counterbalance`. If a sword, club, spear, staff, or similar weapon moves to the other hand, regenerate.
+- Chroma key conflicts with subject colors: choose the key based on subject colors before generation. For green/blue subjects, prefer `#ff00ff`; for pink/purple/magenta subjects, avoid `#ff00ff` and prefer `#00ffff` or another absent pure color. If matting removes body, weapon, eyes, armor, horns, teeth, or outlines, change the key and regenerate.
+- Gutters are insufficient: sprite strips must require large chroma-key gutters, centered cells, complete weapons inside cells, and no mutual contact. If equal splitting cuts the subject or creates neighboring fragments, do not deliver; regenerate with larger gutters or shorter strips.
+- Canvas is insufficient: if a weapon tip, horn, ear, foot, or tail touches an edge or is cropped, enlarge the final canvas or regenerate.
+- Validation passes but visuals fail: structural validation is not art acceptance. Inspect `contact-sheet.png` and `preview.gif` for no hand swaps, cuts, missing colors, fragments, or scale popping.
+- Output is polluted: the final directory contains only contract artifacts. Model source images, alpha sources, failed drafts, and temporary splits must live in a temporary directory and be cleaned before delivery.
 
-## 1. 建立身份锁
+## 1. Establish the Identity Lock
 
-记录所有不可变特征：脸、配色、比例、轮廓粗细、徽记、配件、苔藓或标记、肢体数量、手部顺序、朝向和武器尺寸。在每次生成和修正时都保持基准图可见。
+Record all immutable features: face, palette, proportions, outline weight, emblems, accessories, moss or markings, limb count, hand order, facing direction, and weapon dimensions. Keep the baseline visible during every generation and correction pass.
 
-提示词只是姿势说明，不是身份来源。生成关键姿势时必须把基准帧图片作为视觉身份锚点；如果工具无法直接传入基准图参考，则要求 `image_gen` 在姿势表第一格生成 `reference identity cell`，尽量复现基准帧外观，后面四格才生成 02/05/08/11。参考格只用于对齐检查，不能进入最终帧序列。
+Prompts are pose instructions, not the identity source. When generating key poses, use the baseline frame image as the visual identity anchor. If the tool cannot pass the baseline image directly as reference, require `image_gen` to create a `reference identity cell` as the first cell of the pose sheet, closely reproducing the baseline appearance; the next four cells are 02/05/08/11. The reference cell is only for alignment review and must not enter the final frame sequence.
 
-## 2. 创建共享关键姿势
+## 2. Create Shared Key Poses
 
-调用内置 `image_gen`，在同一张姿势表里一次生成四个定义性姿势，并将它们分配到最终索引 02、05、08 和 11。攻击动作通常使用预备、加速/命中、命中保持/跟随和恢复；00 与 13 保留为精确基准帧。
+Call built-in `image_gen` and generate the four defining poses together in one pose sheet, assigning them to final indices 02, 05, 08, and 11. Attacks usually use anticipation, acceleration/contact, contact hold/follow-through, and recovery; frames 00 and 13 remain the exact baseline frame.
 
-不要把 02、05、08 和 11 分成四次独立生成。独立生成会让模型每次重新解释角色，造成细微但累积的身份漂移，例如眼睛位置变化、武器长度变化、服装纹路变化、比例变瘦/变胖、描边粗细变化或配色偏移。关键姿势必须同批、同 sheet、同色键、同画布、同格距生成，并共享同一份身份段。
+Do not generate 02, 05, 08, and 11 in four independent calls. Independent generation makes the model reinterpret the character each time, causing subtle cumulative identity drift such as eye placement changes, weapon length changes, clothing pattern changes, thinner/fatter proportions, outline-weight changes, or color shifts. Key poses must be same-batch, same-sheet, same-chroma-key, same-canvas, same-gutter generation, sharing the same identity block.
 
-姿势表提示词必须明确写出：
+The pose-sheet prompt must explicitly state:
 
 - `use the provided baseline image as the exact visual identity source, not loose inspiration`;
 - `only change pose and animation timing`;
 - `preserve silhouette language, body-part count, face/eyes, markings, weapon size, color palette, outline weight, and style`;
 - `do not redesign, simplify, beautify, add details, remove details, change proportions, or reinterpret the character`.
 
-每个姿势都要重绘完整角色。允许新露出的表面、自然遮挡、挤压拉伸和透视变化。不要通过旋转切片肢体来伪造需要重绘的姿势。
+Each pose should redraw the complete character. Newly visible surfaces, natural overlap, squash/stretch, and perspective changes are allowed. Never rotate cutout limbs to fake a pose that requires redraw.
 
-关键姿势表必须明确写出格距和拓扑约束：完整角色、完整武器、等格居中、大色键间隔、无标签、无边框、无邻格碎片。对持武器动作，每格都重复同一 `weaponHand` 和 `emptyHand` 锁。
+The key-pose sheet must explicitly specify gutter and topology constraints: complete character, complete weapon, equal centered cells, large chroma-key gutters, no labels, no borders, no neighboring fragments. For weapon actions, repeat the same `weaponHand` and `emptyHand` lock in every cell.
 
-批准关键姿势表前，先把基准帧、参考身份格和四个关键姿势并排检查。允许姿势、遮挡和透视变化；不允许主体身份、画风、比例语言、标志性细节、武器归属、部件数量和颜色关系漂移。只要看起来像“同系列变体”而不是“同一角色换姿势”，整批关键姿势失败并重生。
+Before approving the key-pose sheet, compare the baseline frame, reference identity cell, and four key poses side by side. Pose, overlap, and perspective may vary; subject identity, art style, proportion language, signature details, weapon ownership, body-part count, and color relationships may not drift. If it reads like "same series variant" rather than "same character in a new pose," the whole batch fails and must be regenerated.
 
-## 3. 生成参考引导补间
+## 3. Generate Reference-Guided In-Betweens
 
-调用内置 `image_gen`，同时使用基准图和已批准的关键姿势表作为参考。用 1/2/2/2/1 的插入数量填充锚点序列 `00 -> 02 -> 05 -> 08 -> 11 -> 13`。每个片段按时间顺序生成，不要用新生成的近似图替换任何锚点帧。
+Call built-in `image_gen` while using both the baseline image and the approved key-pose sheet as references. Fill the anchor sequence `00 -> 02 -> 05 -> 08 -> 11 -> 13` with 1/2/2/2/1 inserted frames. Generate each segment in chronological order; do not replace any anchor with a newly generated approximation.
 
-如果生成结果改变身份、复制特征、丢失配件、反转手部顺序，或在轮廓之间产生无法阅读的跳变，应拒绝该批次。
+Reject any pass that changes identity, duplicates features, loses accessories, reverses hand order, or creates unreadable jumps between silhouettes.
 
-如果单条 14 帧 strip 容易拥挤或拆分不稳定，改为分批生成较短 strip，例如 01-06 与 07-12。分批生成仍必须来自 `image_gen`，并共享同一身份锁、weaponHand/emptyHand 锁、色键和格距约束。
+If a single 14-frame strip is crowded or unstable to split, generate shorter strips such as `01-06` and `07-12`. Shorter batches still must come from `image_gen` and must share the same identity lock, weaponHand/emptyHand lock, chroma key, and gutter constraints.
 
-如果关键姿势或补间失败，应重新提示并再次调用 `image_gen`。不要用脚本变形、复制肢体、局部旋转或程序化插值来“修复”成新姿势。
+If a key pose or in-between fails, rewrite the prompt and call `image_gen` again. Do not use script warping, copied limbs, local rotation, or procedural interpolation to "fix" it into a new pose.
 
-## 4. 生成透明图并归一化
+## 4. Produce Transparency and Normalize
 
-使用内置 `image_gen` 时，如果角色包含绿色或蓝色，建议使用纯平 `#ff00ff` 色键背景。随后在本地移除色键，并检查透明角、柔边 alpha 和洋红残留。
+When using built-in `image_gen`, use a flat `#ff00ff` chroma-key background if the character contains green or blue. Then remove the key locally and inspect transparent corners, soft-edge alpha, and chroma residue.
 
-不要机械使用 `#ff00ff`。如果角色包含粉色、紫色、洋红或相近柔边，改用 `#00ffff` 或其他不冲突纯色。抠图后检查主体颜色是否被吃掉；一旦主体缺色，停止后处理并重新生成源图。
+Do not mechanically use `#ff00ff`. If the character contains pink, purple, magenta, or similar soft edges, use `#00ffff` or another non-conflicting pure color. After matting, check whether subject colors were removed; if any subject color is missing, stop post-processing and regenerate the source image.
 
-按阅读顺序拆分格子。对整个序列应用同一缩放比例，保持一致居中和稳定脚底基线。不要逐帧自动适配，因为这会造成比例跳变。将精确基准图只通过平移放到第 00 帧，并把第 00 帧精确复制为第 13 帧。把四个已批准关键帧精确复制到完整帧的 02/05/08/11 位置。这里的本地处理只能整理已生成图，不能创造新的角色动作。
+Split cells in reading order. Apply one common scale to the entire sequence, center consistently, and maintain a stable foot/bottom baseline. Do not auto-fit each frame independently, because that creates scale popping. Place the exact baseline into frame 00 using translation only, and copy frame 00 exactly to frame 13. Copy the four approved keyframes exactly into full-frame indices 02/05/08/11. Local processing may organize generated images only; it must not create new character motion.
 
-拆格后只允许删除与主体分离的小型 alpha 残片。若主体、武器或角/脚被切开，或残片与主体相连，必须重生源图，不能补绘或局部变形。
+After splitting cells, only remove small disconnected alpha fragments separated from the subject. If the subject, weapon, horn, or foot is cut, or a fragment is connected to the subject, regenerate the source image instead of painting or locally deforming it.
 
-所有 PNG 帧都应保持透明。编码 `preview.gif` 时，将每帧合成到纯白 `#FFFFFF` 背景上。
+All PNG frames should remain transparent. When encoding `preview.gif`, composite each frame over pure white `#FFFFFF`.
 
-## 5. 修正并验证
+## 5. Correct and Validate
 
-检查接触表和播放循环。比较相邻帧时重点看：
+Inspect the contact sheet and playback loop. When comparing adjacent frames, focus on:
 
-- 脸、徽记、配色、轮廓和配件是否漂移；
-- 是否缺失或重复肢体与标记；
-- 武器是否始终在同一只屏幕空间手上，另一只手是否保持锚定/配重；
-- 比例、中心或脚底基线是否不稳定；
-- 肢体轨迹是否突兀，预备动作是否不足；
-- 命中姿势和命中保持是否清晰；
-- alpha 是否脏、是否有色键边缘或洋红残留。
+- face, emblems, palette, silhouette, and accessory drift;
+- missing or duplicated limbs and markings;
+- whether the weapon remains in the same screen-space hand and the other hand remains anchoring/counterbalancing;
+- unstable proportions, center, or foot/bottom baseline;
+- abrupt limb trajectories or weak anticipation;
+- contact pose and contact-hold readability;
+- dirty alpha, chroma edges, or magenta residue.
 
-只修正失败区域或失败帧；关键姿势变化后，重新生成受影响的补间帧，并重新检查完整播放循环。视觉接受后运行 `scripts/validate_14frame_pattern.py`。验证通过后仍要再次检查接触表和 GIF；不要用验证 OK 代替视觉验收。
+Correct only the failing region or failing frame. If a key pose changes, regenerate affected in-betweens and recheck the complete playback loop. After visual acceptance, run `scripts/validate_14frame_pattern.py`. After validation passes, inspect the contact sheet and GIF again; never use validation `OK` as a substitute for visual acceptance.
 
-## 提示词契约
+## Prompt Contract
 
-提示词应明确：有序动作节拍、不可变身份特征、相等格子几何、稳定基线、纯平色键背景和禁止事项。要求每个格子都是完整角色，不要标签、边框、阴影、特效、碎屑或融合格子。
+Prompts should explicitly state ordered motion beats, immutable identity features, equal cell geometry, stable baseline, flat chroma-key background, and prohibited extras. Require a complete character in every cell, with no labels, borders, shadows, effects, debris, or fused cells.
