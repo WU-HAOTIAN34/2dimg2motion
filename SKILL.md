@@ -1,201 +1,275 @@
 ---
 name: 2dimg2motion
-description: Use when a user provides one baseline image and requests game animation frames, sprite sequences, attack/walk/idle/hit/death/casting motion, transparent PNG frames, a spritesheet, or consistent whole-character pose animation.
+description: 当用户提供一张基准图，并请求游戏动画帧、精灵序列、攻击/行走/待机/受击/死亡/施法动作、透明 PNG 帧、精灵表、关键帧提示词，或一致的整角色姿势动画时使用。
 ---
 
 # 2dimg2motion
 
-## Overview
+## 概览
 
-Turn one baseline character, creature, vehicle, weapon, or prop image into a consistent transparent game-animation sequence through whole-character key-pose redraw and reference-guided in-betweens.
+将一张基准角色、怪物、载具、武器或道具图片，转换为风格一致、透明背景、可用于游戏的动画序列。生成方式必须采用模型图像生成：默认使用内置 `image_gen` 直接生成整角色关键姿势和补间图。
 
-**Core principle:** establish an identity lock, approve shared key poses, then generate all in-betweens from the baseline and key-pose sheet. Never generate every frame independently.
+**核心原则：**先分析基准帧的主体、部件、武器和画风，建立身份锁；再写出 02/05/08/11 四个关键帧的详细提示词；随后用 `image_gen` 生成共享关键姿势和补间帧。不要用脚本、Pillow、canvas、SVG 或仿射变换来绘制/合成动作图。
 
-Read [references/keypose-redraw.md](references/keypose-redraw.md) before generating animation assets.
+生成动画素材前，先阅读 [references/keypose-redraw.md](references/keypose-redraw.md)。
 
-## Input contract
+## 输入契约
 
-Collect or infer:
+收集或推断以下信息：
 
-- baseline image and facing direction;
-- motion type, ordered beats, and loop behavior;
-- frame count or timing preference;
-- canvas size, stable foot baseline, and naming prefix;
-- required deliverables: frames, spritesheet, contact sheet, and playback preview.
+- 基准图和角色朝向；
+- 动作类型、有序节拍和循环方式；
+- 帧数或时长偏好；
+- 画布尺寸、稳定脚底基线和命名前缀；
+- 必要交付物：关键帧提示词、序列帧、精灵表、接触表和播放预览。
 
-Ask only for information that materially changes the result. Default to 14 transparent RGBA frames per action and a seamless return to the source pose.
+只询问会实质改变结果的信息。默认每个动作生成 14 张透明 RGBA 帧，并无缝回到源姿势。
 
-## Limb-side and topology lock
+## 生成边界
 
-Establish limb identity before designing poses:
+- 默认图像生成能力是内置 `image_gen`。除非用户明确要求 CLI/API 路径，否则不要切换到脚本式图像生成或自写 SDK 调用。
+- 角色关键帧、补间帧、精灵条中的人物姿势必须由 `image_gen` 根据提示词和参考图直接生成。
+- 本地脚本只能用于非创作性后处理：复制生成图、移除色键背景、拆分格子、统一画布、打包 spritesheet、生成预览、写 manifest 和运行验证。
+- 禁止用脚本生产动作图：不要用 Pillow、OpenCV、canvas、SVG、骨骼切片、旋转/缩放/仿射变换、复制粘贴肢体、程序化插值或手写绘图来制造关键帧或补间帧。
+- 如果 `image_gen` 输出的格数、背景或身份一致性不合格，应重新提示并再次调用 `image_gen`。不要用脚本“修成”新的姿势；脚本只能清理背景和组织已生成的图。
+- 任何交付说明都要区分“模型生成内容”和“本地后处理内容”。如果仅完成了关键姿势表而没有生成完整 14 帧，应明确说明。
 
-- Do not infer anatomical left/right from an unqualified word such as "left" or "right" when the source faces front, back, or is mirrored. Ask whether it means screen space or character anatomy unless prior context makes the mapping explicit.
-- Normalize every side to `screen-left` or `screen-right`. If anatomy matters, record both forms, such as `character-left (screen-right)`.
-- Record the `active limb`, its `active shoulder`, the opposite `anchor limb`, and distinctive markings or spikes that identify both limbs.
-- Keep the active limb connected to the same shoulder through every key pose and in-between, including when it crosses the body centerline.
-- Keep the anchor limb visible and attached to its original shoulder as a continuity reference. Do not let it lift, disappear, or become the attacking limb.
-- Use the normalized side names in image-generation prompts and contact-sheet review. Before generation, state the lock explicitly, for example `active=screen-left; anchor=screen-right`.
-- Persist `coordinateSpace`, `activeLimb`, `activeShoulder`, and `anchorLimb` in `manifest.json`. Never alternate between anatomical and screen-space naming inside one animation.
+## 失败复盘硬约束
 
-## Default 14-frame plan
+以下问题一旦出现，视为该批生成失败，必须重新提示并再次调用 `image_gen`，不要靠后处理掩盖：
 
-Use six immutable anchors in this order: `00 -> 02 -> 05 -> 08 -> 11 -> 13`.
+- **武器换手或主动肢体换侧**：剑、棍、枪、法杖等武器从 `screen-left` 手变成 `screen-right` 手，或反过来，直接拒绝。提示词必须逐字写明“武器始终握在同一只屏幕空间手上；另一只手为空手/锚定/配重，不得持武器”。
+- **角色颜色被色键吃掉**：选择色键前先列出角色主色、武器色和高光色。色键不得接近主体颜色；绿色/蓝色主体优先 `#ff00ff`，粉色/紫色/洋红主体不要用 `#ff00ff`，优先 `#00ffff` 或其他不在主体内的纯色。抠图后如果身体、武器、眼睛、护甲、角或边线被透明化，必须换色键重生源图。
+- **格距不足导致拆帧切开主体**：生成 sprite strip 时必须要求“大空白色键 gutter、每格居中、完整武器入格”。如果等分拆格会切到相邻主体、武器、耳朵、角、脚或出现邻格碎片，不要交付；优先分批生成较短 strip（例如 01-06 与 07-12），或重新生成更大间距版本。
+- **画布太小导致剑尖/角/武器贴边**：归一化画布必须留安全边距；接触表中任何武器尖端、角、耳朵、脚、尾巴贴边或裁切，都要扩大最终画布或重生。
+- **输出目录污染**：最终输出目录只能保留输出契约文件。模型源图、透明源图、失败稿、临时拆分稿和调试图放到临时目录；完成后删除。不要把 `*-imagegen-*` 中间产物留在最终目录，除非用户明确要求保留过程稿。
+- **验证通过但视觉失败**：脚本验证只是结构门槛。验证 OK 后仍必须查看 `contact-sheet.png` 和 `preview.gif`；只要出现换手、切割、主体缺色、残片、比例跳变或动作不可读，就不能宣称完成。
 
-| Index | Role | Rule |
+## 肢体侧向与拓扑锁
+
+设计姿势前，先建立肢体身份：
+
+- 当源图正面、背面或镜像朝向时，不要从未限定的“左”或“右”推断解剖学左右。除非上下文已经明确，否则询问用户指的是屏幕空间还是角色身体左右。
+- 所有侧向都归一化为 `screen-left` 或 `screen-right`。如果解剖学方向重要，同时记录两种形式，例如 `character-left (screen-right)`。
+- 记录 `active limb`、它的 `active shoulder`、相对的 `anchor limb`，以及能识别两侧肢体的特殊标记或尖刺。
+- 对持武器动作，记录 `activeWeapon`、`weaponHand`、`emptyHand` 和屏幕空间侧向。提示词里不要只写“右手/左手挥剑”，必须写“screen-right sword hand remains the sword hand in every frame；screen-left hand remains empty/counterbalance”等等效锁定语。
+- 在每个关键姿势和补间中，即使主动肢体跨过身体中心线，也必须保持它连接到同一个肩部。
+- 锚定肢体要保持可见，并连接到原始肩部，作为连续性参考。不要让它抬起、消失或变成攻击肢体。
+- 在图像生成提示词和接触表复查中使用归一化侧向名称。生成前明确声明拓扑锁，例如 `active=screen-left; anchor=screen-right`。
+- 在 `manifest.json` 中持久化 `coordinateSpace`、`activeLimb`、`activeShoulder` 和 `anchorLimb`。同一个动画内不要混用解剖学命名和屏幕空间命名。
+
+## 默认 14 帧计划
+
+使用 6 个不可变锚点，顺序为：`00 -> 02 -> 05 -> 08 -> 11 -> 13`。
+
+| 索引 | 角色 | 规则 |
 |---|---|---|
-| 00 | baseline start | Place the exact source on the final canvas; do not redraw or rescale it. |
-| 01 | in-between | Interpolate 00 -> 02. |
-| 02 | key frame 1 | First generated defining pose. |
-| 03-04 | in-betweens | Interpolate 02 -> 05 in chronological order. |
-| 05 | key frame 2 | Second generated defining pose. |
-| 06-07 | in-betweens | Interpolate 05 -> 08 in chronological order. |
-| 08 | key frame 3 | Third generated defining pose. |
-| 09-10 | in-betweens | Interpolate 08 -> 11 in chronological order. |
-| 11 | key frame 4 | Fourth generated defining pose. |
-| 12 | in-between | Interpolate 11 -> 13. |
-| 13 | baseline end | Copy frame 00 exactly. |
+| 00 | 基准起始帧 | 将精确源图放到最终画布上；不要重绘或缩放。 |
+| 01 | 补间帧 | 插值 00 -> 02。 |
+| 02 | 关键帧 1 | 第一个生成的定义性姿势。 |
+| 03-04 | 补间帧 | 按时间顺序插值 02 -> 05。 |
+| 05 | 关键帧 2 | 第二个生成的定义性姿势。 |
+| 06-07 | 补间帧 | 按时间顺序插值 05 -> 08。 |
+| 08 | 关键帧 3 | 第三个生成的定义性姿势。 |
+| 09-10 | 补间帧 | 按时间顺序插值 08 -> 11。 |
+| 11 | 关键帧 4 | 第四个生成的定义性姿势。 |
+| 12 | 补间帧 | 插值 11 -> 13。 |
+| 13 | 基准结束帧 | 精确复制第 00 帧。 |
 
-Generate exactly four key frames at indices 02, 05, 08, and 11. Save exact copies of those images in both `keyframe/` and their matching `fullframe/` positions. Never redraw a key frame during interpolation. Use one inserted frame around each baseline endpoint and two inserted frames between each pair of generated key frames.
+只在索引 02、05、08 和 11 生成四个关键帧。将这些图片的精确副本同时保存到 `keyframe/` 和 `fullframe/` 中对应位置。补间阶段绝不重绘关键帧。基准端点附近各插入 1 帧，生成关键帧之间各插入 2 帧。
 
-Persist `frameCount: 14`, `keyframeIndices: [2, 5, 8, 11]`, `anchorIndices: [0, 2, 5, 8, 11, 13]`, and `segmentInsertions: [1, 2, 2, 2, 1]` in `manifest.json`.
-Persist `previewBackground: "#FFFFFF"` in `manifest.json`.
+在 `manifest.json` 中持久化 `frameCount: 14`、`keyframeIndices: [2, 5, 8, 11]`、`anchorIndices: [0, 2, 5, 8, 11, 13]` 和 `segmentInsertions: [1, 2, 2, 2, 1]`。
+在 `manifest.json` 中持久化 `previewBackground: "#FFFFFF"`。
 
-## Workflow
+## 工作流程
 
-### 1. Inspect and establish the identity lock
+### 1. 分析基准帧并建立身份锁
 
-Inspect the source at original resolution. Record every invariant that must survive redraw:
+以原始分辨率检查源图。生成图像前，先写出一份可复用的“基准帧分析”，记录所有必须在重绘中保留的不变量：
 
-- face, expression, silhouette, proportions, and facing direction;
-- palette, outline weight, shading style, and material treatment;
-- limb count, hand order, clothing, armor, markings, and accessories;
-- shoulder-to-limb topology, active-side mapping, anchor limb, and side-specific markings;
-- weapon shape, grip, length, emblem, and distinctive small details.
+- 主体类型：角色、怪物、载具、武器或道具是什么，整体轮廓和视觉读法是什么；
+- 身体结构：头、躯干、四肢、翅膀、尾巴、爪、角、壳、外骨骼等部件的数量、位置、比例和朝向；
+- 脸、表情、轮廓、比例和朝向；
+- 配色、描边粗细、明暗风格、材质处理、像素/手绘/卡通/写实等画风与样式；
+- 肢体数量、手部顺序、服装、护甲、标记和配件；
+- 肩部到肢体的拓扑、主动侧映射、锚定肢体和侧向特有标记；
+- 武器形状、握法、长度、徽记和独特小细节。
 
-Record uncertain or occluded regions explicitly. Keep the source visible during every generation and correction pass.
+明确记录不确定或被遮挡区域。将这份分析作为后续所有关键帧提示词的固定身份段；每次生成和修正时都保持源图可见。
 
-### 2. Design motion beats and key poses
+### 2. 设计动作节拍和关键姿势
 
-Choose readable beats before generating art:
+生成图像前，先选择可读的动作节拍：
 
-- idle: settle -> rise -> settle;
-- walk: contact -> down -> passing -> up -> opposite contact;
-- attack: guard -> anticipation -> acceleration -> contact -> contact hold -> recovery;
-- hit: contact -> recoil -> settle;
-- death: imbalance -> collapse -> impact -> rest.
+- 待机：下沉 -> 抬起 -> 下沉；
+- 行走：触地 -> 下沉 -> 迈步/通过 -> 上升 -> 对侧触地；
+- 攻击：防御 -> 预备 -> 加速 -> 命中 -> 命中保持 -> 恢复；
+- 受击：命中 -> 后仰 -> 稳定；
+- 死亡：失衡 -> 倒塌 -> 冲击 -> 静止。
 
-Select exactly four generated key poses for indices 02, 05, 08, and 11. For attacks, use anticipation, acceleration/contact, contact hold/follow-through, and recovery; frames 00 and 13 supply the neutral guard. Make contact the clearest silhouette.
+为索引 02、05、08 和 11 选择恰好四个生成关键姿势。攻击动作使用预备、加速/命中、命中保持/跟随和恢复；00 与 13 提供中性防御或基准姿势。命中姿势要拥有最清晰的轮廓。
 
-For one-limb actions, describe both limbs in every beat: state how the active limb remains attached to its locked shoulder and how the anchor limb stays fixed. Track the shoulder-to-hand trajectory, not only the hand position.
+对于单肢体动作，每个节拍都要描述两侧肢体：说明主动肢体如何保持连接到锁定肩部，锚定肢体如何保持固定。追踪肩到手的完整轨迹，而不只看手尖位置。
 
-### 3. Generate one coherent key-pose sheet
+### 3. 写出四个关键帧提示词
 
-**REQUIRED SUB-SKILL:** Use `imagegen` for whole-character key-pose redraw.
+调用内置 `image_gen` 前，先写出 02、05、08 和 11 四个关键帧的详细提示词简报。每条提示词必须由同一份基准帧分析派生，不能临场重新解释角色身份。
 
-Generate all key poses together on one evenly divided sheet. Redraw the complete character in every cell. Permit natural squash, perspective, foreshortening, overlap, and newly visible surfaces while preserving the identity lock.
+**提示词不是唯一输入。** 四个关键帧提示词只是姿势规格书，不能让模型只根据文字独立重绘关键帧；生成时必须同时引用基准帧图片作为视觉身份锚点。若当前界面或工具无法把基准图作为参考输入传给 `image_gen`，必须在提示词中要求输出姿势表包含一个 `reference identity cell`：第一格精确复现基准帧外观，仅用于身份对照；后四格才是 02/05/08/11。拆分交付时丢弃该参考格，不把它当作动作帧。
 
-After approval, split the sheet into four transparent files named with their final indices: `_02`, `_05`, `_08`, and `_11`. These files become immutable anchors for interpolation.
+每个关键帧提示词都包含：
 
-Use a perfectly flat chroma-key background with generous gutters and no labels, borders, shadows, effects, debris, or fused cells. Prefer `#ff00ff` when the subject contains green or blue.
+- 固定身份段：主体是什么、身体部件和武器有哪些、比例、轮廓、配色、描边、材质、画风和禁止改变的细节；
+- 当前姿势段：该索引对应的动作节拍、重心、身体倾斜、头部朝向、主动肢体和锚定肢体位置、武器轨迹、接触点和清晰轮廓；
+- 连续性段：与上一锚点和下一锚点的运动方向、脚底/底部基线、循环回到 00/13 的关系；
+- 画布与背景段：完整角色、相等格子、稳定缩放、充足安全边距、纯平色键背景、无标签/边框/阴影/特效。
 
-Reject the sheet if any pose changes identity, loses details, duplicates limbs, reverses hand order, crops the subject, breaks the stable foot baseline, obscures the active shoulder attachment, or moves/hides the anchor limb. A limb crossing the torso must still be traceable to its locked shoulder.
+如果提示词无法明确说明某个身体部件、武器、侧向标记或画风约束如何继承自基准帧，不要生成图片；先回到基准帧分析补齐缺口。提示词阶段只设计关键帧，不生成补间帧。
 
-### 4. Generate reference-guided in-betweens
+### 4. 生成一张连贯的关键姿势表
 
-**REQUIRED SUB-SKILL:** Use `imagegen` with both the original baseline and approved key-pose sheet as references.
+**必需子技能：**使用内置 `image_gen` 进行整角色关键姿势重绘。
 
-Generate in-betweens together in chronological order. Specify the exact beat assigned to each cell, identical cell geometry, stable character scale, coherent limb trajectories, and the intended contact hold.
+使用第 3 步的四条关键帧提示词和基准帧视觉参考，在一张等分姿势表中一次生成所有关键姿势。每个格子都重绘完整角色。允许自然挤压、透视、缩短、遮挡和新露出的表面，同时保持身份锁。
 
-Generate the five anchor-to-anchor segments with fixed insertion counts: 00->02 gets one frame; 02->05, 05->08, and 08->11 get two frames each; 11->13 gets one frame. Use the two adjacent anchors plus the baseline and full key-pose set as references. Do not include generated substitutes for any anchor index.
+不要分四次独立生成 02、05、08 和 11。独立调用会让模型在每次生成时重新采样角色，常见结果是脸、眼睛、武器长度、盔甲纹路、描边粗细、身体比例或色彩产生细微偏移。除非用户明确只要单张概念草图，否则关键姿势必须同批生成在同一张 sheet 中，并共享同一个基准图、同一个身份段、同一个色键、同一个画布和同一个格距约束。
 
-Repeat the side lock verbatim in the in-between prompt: name the active limb in screen space, require connection to the same shoulder in every cell, and state that the anchor limb must remain visible and stationary. Treat a switched or ambiguous shoulder attachment as a failed generation, even if each frame looks plausible by itself.
+姿势表提示词必须显式加入身份对齐规则：
 
-Never generate every frame independently. Never accept an in-between pass whose style or identity differs from the approved key poses.
+- `use the provided baseline image as the visual identity source, not as loose inspiration`；
+- `preserve the exact silhouette language, color palette, outline weight, facial features, markings, weapon size, and body-part count from the baseline`；
+- `only change pose, weight, limb angles, squash/stretch, and motion timing`；
+- `do not redesign, simplify, beautify, add details, remove details, change proportions, or reinterpret the character`。
 
-### 5. Remove the background and normalize frames
+生成关键姿势表时必须调用 `image_gen`。不要用脚本从基准图旋转肢体、移动局部切片或程序化变形来伪造关键姿势。
 
-Remove the flat chroma-key background locally and check soft edge alpha plus magenta residue. Split cells in reading order.
+关键姿势表必须有足够格间距。提示词中明确要求“exactly 4 separate full-body sprites, centered in equal slots, large flat chroma-key gutters, no overlap, no neighboring fragments”。如果任一关键姿势的武器换手、锚定手持武器、主体被裁切或格子互相污染，重生整张关键姿势表。
 
-Place each frame on one RGBA canvas using one common scale and alignment transform. Do not independently auto-fit frames. Maintain the stable foot baseline and direction. Place the exact source at frame 00 using translation only, then copy frame 00 byte-for-byte to frame 13.
+批准后，将姿势表拆分成四个透明文件，并以最终索引命名：`_02`、`_05`、`_08` 和 `_11`。这些文件成为补间的不可变锚点。
 
-Keep all PNG frames transparent. Build `preview.gif` by compositing every RGBA frame over a perfectly solid white `#FFFFFF` background. Do not use transparency, checkerboards, gray, or dark preview backgrounds.
+批准前必须进行“基准差异审查”：把四个关键姿势与基准帧并排查看，逐项确认主体身份、头脸/眼睛、标志性轮廓、服装/护甲/壳纹、武器或道具、描边粗细、主色和高光色没有漂移。动作造成的遮挡、透视和拉伸可以变化；身份特征、部件数量、武器归属、画风和比例语言不能变化。只要出现“像同系列新角色”而不是“同一角色换姿势”，整张关键姿势表失败并重生。
 
-Name full frames contiguously from `hero-attack_00.png` through `hero-attack_13.png`. Name key frames with the same prefix and their reserved indices: `_02`, `_05`, `_08`, and `_11`.
+使用完全平坦的色键背景，保留充足格间距，不要标签、边框、阴影、特效、碎屑或融合格子。当主体包含绿色或蓝色时，优先使用 `#ff00ff`。
 
-### 6. Correct temporal and identity drift
+如果任何姿势改变身份、丢失细节、重复肢体、反转手部顺序、裁切主体、破坏稳定脚底基线、遮住主动肩连接，或移动/隐藏锚定肢体，应拒绝该姿势表。肢体跨过躯干时，仍必须能追溯到锁定肩部。
 
-Compare adjacent frames and correct only the failing region or pose. Regenerate affected in-betweens after a key pose changes.
+### 5. 生成参考引导补间
 
-Check face, emblem, palette, outline, accessories, limb count, markings, weapon dimensions, scale, center, baseline, trajectories, and silhouette continuity.
+**必需子技能：**使用内置 `image_gen`，并同时引用原始基准图和已批准关键姿势表。
 
-If an active limb switches shoulders, becomes ambiguous behind the torso, or inherits the anchor limb's markings, reject the affected pose. Regenerate the key pose and every dependent in-between. Never repair a limb switch by mirroring an isolated frame, relabeling the side, or accepting the hand trajectory without checking its shoulder origin.
+按时间顺序一起生成补间帧。指定每个格子的准确节拍、相同格子几何、稳定角色比例、连贯肢体轨迹和预期命中保持。
 
-### 7. Validate outputs
+按固定插入数量生成五个锚点片段：00->02 插入 1 帧；02->05、05->08 和 08->11 各插入 2 帧；11->13 插入 1 帧。使用相邻两个锚点、基准图和完整关键姿势集作为参考。不要包含任何锚点索引的生成替代品。
 
-Run deterministic validation for the 14-frame relationship:
+在补间提示词中逐字重复侧向锁：用屏幕空间命名主动肢体，要求它在每个格子中连接到同一肩部，并声明锚定肢体必须保持可见和稳定。即使单帧看起来合理，只要肩部连接切换或含糊，就视为生成失败。
+
+当 14 帧单条 strip 容易拥挤、互相污染或切分失败时，不要硬拆。改为让 `image_gen` 分批生成较短源图，例如 `01-06` 和 `07-12` 两张 6 帧 strip；00 和 13 仍使用精确基准图。分批源图必须共享同一身份锁、同一 weaponHand/emptyHand 锁、同一色键和同一画布/格距约束。
+
+补间帧必须由 `image_gen` 生成。绝不独立生成每一帧。不要接受与已批准关键姿势风格或身份不一致的补间批次。不要用程序化插值、图像变形或复制关键帧来替代模型生成补间。
+
+### 6. 移除背景并归一化帧
+
+在本地移除平坦色键背景，并检查柔边 alpha 与洋红残留。按阅读顺序拆分格子。本地处理只允许清理和组织 `image_gen` 已生成的图，不允许新增或改变角色姿势。
+
+色键移除前，先确认色键不在主体颜色、武器、高光或描边中。抠图后必须检查主体覆盖：身体主色、武器、眼睛、护甲、角、牙齿和黑色描边都应保留。如果主体颜色被挖空、边线断裂或武器消失，停止后处理并用不冲突色键重新生成。
+
+将每帧放到同一个 RGBA 画布上，使用同一缩放和对齐变换。不要逐帧自动适配。保持稳定脚底基线和朝向。将精确源图只通过平移放到第 00 帧，然后逐字节复制第 00 帧为第 13 帧。
+
+拆格后如果出现相邻格碎片，只能删除与主体分离的小型离散 alpha 组件；不得用画笔、补绘、旋转、拉伸或复制肢体修补主体。若碎片与主体相连、主体被切开或武器被裁掉，必须重生源图。
+
+所有 PNG 帧保持透明。构建 `preview.gif` 时，将每个 RGBA 帧合成到完全纯白的 `#FFFFFF` 背景上。不要使用透明、棋盘格、灰色或深色预览背景。
+
+完整帧连续命名，例如从 `hero-attack_00.png` 到 `hero-attack_13.png`。关键帧使用同一前缀和保留索引：`_02`、`_05`、`_08` 和 `_11`。
+
+### 7. 修正时间连续性和身份漂移
+
+比较相邻帧，只修正失败区域或失败姿势。关键姿势变化后，重新生成受影响的补间。
+
+检查脸、徽记、配色、轮廓、配件、肢体数量、标记、武器尺寸、比例、中心、基线、轨迹和轮廓连续性。
+
+如果主动肢体切换肩部、在躯干后变得含糊，或继承了锚定肢体的标记，应拒绝受影响姿势。重新生成关键姿势和所有依赖补间。不要通过镜像单帧、重命名侧向，或只看手部轨迹而忽略肩部来源来修复肢体切换。
+
+### 8. 验证输出
+
+为 14 帧关系运行确定性验证：
 
 ```powershell
 python scripts/validate_14frame_pattern.py --baseline source.png --keyframes-dir output/keyframe --fullframes-dir output/fullframe --preview output/preview.gif --prefix hero-attack
 ```
 
-Inspect a contact sheet and playback loop. Confirm:
+检查接触表和播放循环。确认：
 
-- contiguous names, RGBA mode, one canvas size, and transparent corners;
-- exactly 14 full frames and exactly four key frames at 02/05/08/11;
-- frame 00 equals frame 13 byte-for-byte after output, and both are the source translated without redraw or scaling;
-- every key-frame file is pixel-identical to its matching full-frame index;
-- `preview.gif` contains exactly 14 frames on a solid white `#FFFFFF` background;
-- no chroma fringe or magenta residue;
-- no identity drift, missing details, extra limbs, or scale popping;
-- the active limb traces back to the same shoulder in every adjacent frame;
-- the anchor limb stays visible, attached to its original shoulder, and non-attacking;
-- side-specific spots, claws, armor, or accessories follow the correct limb across torso overlap;
-- stable foot baseline and center;
-- readable anticipation, acceleration, contact, contact hold, and recovery;
-- smooth loop endpoints when looping is requested.
+- 命名连续、RGBA 模式、统一画布尺寸和透明四角；
+- 完整帧恰好 14 张，关键帧恰好 4 张，位于 02/05/08/11；
+- 第 00 帧和第 13 帧在输出后逐字节相同，并且都是未重绘、未缩放、只平移过的源图；
+- 每个关键帧文件与完整帧对应索引逐像素相同；
+- `preview.gif` 包含恰好 14 帧，并使用纯白 `#FFFFFF` 背景；
+- 没有色键边缘或洋红残留；
+- 没有身份漂移、缺失细节、额外肢体或比例跳变；
+- 主动肢体在每个相邻帧中都能追溯到同一肩部；
+- 锚定肢体保持可见，连接到原始肩部，并且不成为攻击肢体；
+- 侧向特有斑点、爪、护甲或配件在躯干遮挡中跟随正确肢体；
+- 脚底基线和中心稳定；
+- 预备、加速、命中、命中保持和恢复可读；
+- 请求循环时，循环端点平滑。
+- 输出目录只包含输出契约文件；临时源图、失败稿、色键图、alpha 源图和调试拆帧已删除或放在最终目录之外。
 
-Correct failures and repeat both visual and deterministic validation. Report exact output paths and evidence.
+修正失败项，并重复视觉检查和确定性验证。必须先看 `contact-sheet.png`，再看 `preview.gif`，最后报告精确输出路径和证据。
 
-## Output contract
+## 输出契约
 
 ```text
 output/
-|-- keyframe/              # exact generated anchors at 02, 05, 08, 11
-|-- fullframe/             # contiguous transparent RGBA sequence 00-13
-|-- spritesheet.png        # packed sequence
-|-- contact-sheet.png      # visual consistency review
-|-- preview.gif            # 14-frame playback loop on solid white #FFFFFF
-`-- manifest.json          # source, canvas, side/topology lock, key indices, segment plan, frame order
+|-- keyframe-prompts.md    # 基于基准帧分析写出的 02、05、08、11 关键帧提示词
+|-- keyframe/              # 02、05、08、11 的精确生成锚点
+|-- fullframe/             # 00-13 的连续透明 RGBA 序列
+|-- spritesheet.png        # 打包序列
+|-- contact-sheet.png      # 视觉一致性检查图
+|-- preview.gif            # 白色 #FFFFFF 背景上的 14 帧播放循环
+`-- manifest.json          # 源图、画布、侧向/拓扑锁、关键索引、片段计划、帧顺序
 ```
 
-## Quick reference
+最终目录不要包含模型源图、透明源图、失败稿、临时 split、`*-imagegen-*` 过程图或调试文件；这些只允许存在于临时目录，交付前清理。
 
-| Stage | Gate |
+## 快速参考
+
+| 阶段 | 门槛 |
 |---|---|
-| Identity | Immutable features, screen-space side mapping, and limb topology are recorded |
-| Key poses | Exactly four anchors occupy 02, 05, 08, and 11 |
-| In-betweens | Fixed 1/2/2/2/1 insertions fill the five anchor segments |
-| Normalize | One scale, canvas, direction, and stable foot baseline |
-| Correct | Adjacent frames preserve identity and trajectory continuity |
-| Deliver | Deterministic checks, contact sheet, and playback loop pass |
+| 基准分析 | 已记录主体、身体部件、武器、画风样式、不可变特征、屏幕空间侧向映射和肢体拓扑 |
+| 关键帧提示词 | 02、05、08、11 各有一条详细提示词，且都继承同一身份段 |
+| 关键姿势 | 恰好四个锚点位于 02、05、08 和 11 |
+| 补间 | 固定 1/2/2/2/1 插入数量填充五个锚点片段 |
+| 归一化 | 使用同一比例、画布、朝向和稳定脚底基线 |
+| 修正 | 相邻帧保持身份和轨迹连续 |
+| 交付 | 确定性检查、接触表和播放循环通过 |
 
-## Example
+## 示例
 
-User: "Use this golem image to make a heavy ground-smash attack."
+用户：“用这张魔像图做一个重砸地面攻击动画。”
 
-Record its identity lock, generate four anchors for 02/05/08/11 together, fill the 1/2/2/2/1 segment insertions, place the exact baseline at 00 and 13, inspect contact and playback, validate the 14-frame relationships, and deliver the transparent sequence.
+分析基准帧的主体、身体部件、武器和画风，记录身份锁，写出 02/05/08/11 四条关键帧提示词，一起生成四个锚点，按 1/2/2/2/1 插入数量补齐帧，将精确基准图放到 00 和 13，检查接触表和播放效果，验证 14 帧关系，然后交付透明序列。
 
-## Common mistakes
+## 常见错误
 
-- Generating each frame separately: identity and timing drift. Use one shared key-pose sheet and reference-guided in-betweens.
-- Treating key poses as loose references: copy the approved 02/05/08/11 files exactly into `fullframe/`; never regenerate them during interpolation.
-- Redrawing loop endpoints: frames 00 and 13 must be the same translated baseline pixels, not similar-looking generations.
-- Auto-fitting every pose: scale pops between frames. Apply one common transform.
-- Accepting a pretty key pose with changed details: visual quality does not excuse identity drift.
-- Treating "left" or "right" as self-evident: normalize to screen space and record anatomy separately when needed.
-- Tracking only the hand tip: an arm can cross the torso while silently switching shoulders. Trace the complete limb and keep the opposite arm as an anchor.
-- Fixing a switch by mirroring one frame: this reverses markings and topology. Regenerate the key pose and dependent in-betweens.
-- Adding effects during character generation: detached dust and motion lines complicate extraction. Add effects later as separate assets.
-- Checking only individual PNGs: a frame can look good alone and fail in motion. Inspect the contact sheet and playback loop.
-- Trusting the generated background: remove chroma locally and measure magenta residue.
-- Using a transparent, checkerboard, gray, or dark GIF background: composite every preview frame over solid white `#FFFFFF`.
+- 独立生成每一帧：会造成身份和节奏漂移。应使用共享关键姿势表和参考引导补间。
+- 用脚本生成动作图：这会绕过模型图像生成流程。关键帧和补间帧必须来自 `image_gen`；脚本只能用于抠图、拆图、打包和验证。
+- 跳过基准帧分析直接写生成提示词：会遗漏主体部件、武器、画风或侧向标记。应先写基准帧分析，再派生四个关键帧提示词。
+- 只靠四段文字提示词生成关键帧：会让模型把基准帧当概念而不是身份锚，产生细微偏移。关键姿势生成必须同时使用基准帧视觉参考；无法直接引用时，在同一 sheet 内加入参考身份格用于对照。
+- 四个关键帧提示词各自发挥：会导致角色像四个相似变体。四条提示词必须共享同一身份段，只改变姿势和运动节拍。
+- 把关键姿势当作松散参考：必须把已批准的 02/05/08/11 文件精确复制进 `fullframe/`，补间时不要重绘它们。
+- 重绘循环端点：00 和 13 必须是同一个经过平移的基准帧像素，而不是相似的生成图。
+- 逐帧自动适配：会产生比例跳变。应使用同一个公共变换。
+- 用仿射变换、局部肢体旋转或复制粘贴制造新姿势：这不是有效生成。应重新调用 `image_gen` 生成失败的关键姿势或补间批次。
+- 接受细节改变但“看起来漂亮”的关键姿势：视觉质量不能抵消身份漂移。
+- 接受武器换手：这是拓扑失败，不是小瑕疵。必须重生，并在提示词中重复 weaponHand/emptyHand 锁。
+- 使用与主体冲突的色键：例如粉色/紫色角色使用 `#ff00ff`，会把身体或柔边抠掉。先看主体主色再选色键。
+- 把 14 帧都塞进一条拥挤 strip：模型可能压缩间距，拆格会切开角色或引入邻格碎片。拥挤时改用 6+6 或更短分批源图。
+- 只信任验证脚本：验证 OK 只能说明文件结构满足要求，不能说明动作、美术和拓扑正确。必须检查接触表和 GIF。
+- 把中间图留在最终目录：输出契约是交付面，失败稿和调试图会误导后续使用者。临时产物必须清理。
+- 把“左”或“右”视为不言自明：应归一化到屏幕空间，必要时同时记录解剖学方向。
+- 只追踪手尖：手臂可能跨过躯干并悄悄切换肩部。要追踪完整肢体，并用另一侧手臂作为锚点。
+- 通过镜像单帧修复切换：这会反转标记和拓扑。应重新生成关键姿势和依赖补间。
+- 在角色生成阶段添加特效：分离的尘土和运动线会增加抠图难度。特效应后续作为独立素材添加。
+- 只检查单张 PNG：单帧好看不代表运动成立。必须检查接触表和播放循环。
+- 信任生成背景：应本地移除色键并测量洋红残留。
+- 使用透明、棋盘格、灰色或深色 GIF 背景：预览帧必须合成到纯白 `#FFFFFF`。
