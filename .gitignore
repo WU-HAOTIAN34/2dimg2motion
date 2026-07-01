@@ -2,12 +2,13 @@
 output/
 sample/
 tmp/
-
+img2mo-knowledge/
 
 # Local agent settings
 .claude/
 .agents/
 .codex/
+motion/
 
 # Temporary design documents
 docs/

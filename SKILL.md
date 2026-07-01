@@ -11,13 +11,16 @@ Convert one baseline character, creature, vehicle, weapon, or prop image into a 
 
 **Core principle:** first analyze the baseline frame's subject, body parts, weapons, and art style; establish an identity lock; write detailed prompts for keyframes 02/05/08/11; then use `image_gen` to generate shared key poses and in-betweens. Do not use scripts, Pillow, canvas, SVG, or affine transforms to draw or synthesize motion artwork.
 
-Before generating animation assets, read [references/keypose-redraw.md](references/keypose-redraw.md).
+Before generating animation assets, read [references/keypose-redraw.md](references/keypose-redraw.md). When designing action timing or prompt wording, also consult [references/motion-prompt-patterns.md](references/motion-prompt-patterns.md), which distills reusable patterns from the local `motion/` reference library.
+
+If project knowledge exists in `img2mo-knowledge/`, read `img2mo-knowledge/index.md` before prompt writing. Then read only the relevant knowledge files for the requested action or style: `action-patterns.md`, `style-patterns.md`, `prompt-patterns.md`, `failures.md`, or matching records in `learnings.jsonl`. Project knowledge is guidance, not ground truth: never let it override the current baseline identity, current user request, or hard failure constraints.
 
 ## Input Contract
 
 Collect or infer:
 
 - baseline image and character facing direction;
+- whether the baseline image has already been standardized for animation: foreground subject longest side 300-400 px, transparent action margins on all sides, no tight crop, and no huge source canvas;
 - motion type, ordered beats, and loop behavior;
 - preferred frame count or timing;
 - canvas size, stable foot/bottom baseline, and naming prefix;
@@ -42,6 +45,8 @@ If any of the following appears, treat the batch as failed. Re-prompt and call `
 - **Character colors removed by chroma key:** before choosing a chroma key, list the character's main colors, weapon colors, and highlight colors. The key color must not be close to subject colors. For green/blue subjects, prefer `#ff00ff`; for pink/purple/magenta subjects, avoid `#ff00ff` and prefer `#00ffff` or another pure color absent from the subject. If matting removes body, weapon, eyes, armor, horns, or outlines, change the key color and regenerate the source image.
 - **Insufficient gutters causing split-frame cuts:** sprite-strip prompts must require large chroma-key gutters, centered cells, and complete weapons inside each cell. If equal-cell splitting cuts into a neighboring body, weapon, ear, horn, foot, or introduces neighboring fragments, do not deliver it. Prefer shorter batches such as `01-06` and `07-12`, or regenerate with larger spacing.
 - **Canvas too small:** normalized canvases must leave a safety margin. If a weapon tip, horn, ear, foot, tail, or body part touches the edge or is cropped in the contact sheet, enlarge the final canvas or regenerate.
+- **Unstandardized baseline frame:** if the source image is very large, tightly cropped around the character, has no transparent action margin, or cannot contain the likely attack/walk stretch without overlap, standardize it before generation with `scripts/standardize_baseline.py`. Do not start image generation from a huge or edge-hugging source; it causes crowded source sheets, clipped cells, forced local resizing, scale popping, and long runtimes.
+- **Scale popping or drifting centers:** if the model draws some cells as visibly smaller/larger variants, or local processing needs per-frame scale/center fitting to make frames align, reject the source batch. Regenerate with stronger same-size prompts or use shorter batches. If a pose needs more room, enlarge the final canvas instead of shrinking that pose or the whole sequence.
 - **Output directory pollution:** the final output directory may contain only contract files. Model source images, alpha sources, failed drafts, temporary splits, and debug images belong in a temporary directory and must be deleted after delivery. Do not leave `*-imagegen-*` intermediates in the final output unless the user explicitly requests process drafts.
 - **Validation passes but visuals fail:** deterministic validation is only a structural gate. After `OK`, inspect `contact-sheet.png` and `preview.gif`. If there is hand swapping, slicing, missing colors, fragments, scale popping, or unreadable motion, do not claim completion.
 
@@ -57,6 +62,16 @@ Before designing poses, establish limb identity:
 - The anchor limb must remain visible and attached to its original shoulder as a continuity reference. Do not let it lift, disappear, or become the attacking limb.
 - Use normalized side names in image-generation prompts and contact-sheet review. Before generation, explicitly state the topology lock, for example `active=screen-left; anchor=screen-right`.
 - Persist `coordinateSpace`, `activeLimb`, `activeShoulder`, and `anchorLimb` in `manifest.json`. Do not mix anatomical and screen-space naming inside one animation.
+
+### Weapon, Prop, Accessory, and Creature Locks
+
+Before prompt writing, classify non-body elements and non-human motion drivers:
+
+- Record `activeWeapon`, `carriedProp`, `passiveAccessory`, and `detachedProp` separately. A held torch, shield, embedded arrow, helmet crest, and thrown weapon need different rules.
+- Every weapon or carried prop must have one owner: `weaponHand`, `propHand`, mouth, tail, harness, or body socket. It must not switch sides, duplicate, float, or detach unless a release beat explicitly says so.
+- Passive accessories follow their attachment surface. Embedded swords/arrows, shell spikes, antlers, crystals, capes, and belt items may lag or tilt, but they must not become active limbs or attacking weapons by accident.
+- For non-humanoid creatures, record `activeFeature` and `anchorSurface` instead of forcing `activeLimb`: horn, jaw, tail, branch, shell, belly mass, root feet, bottom puddle, or whole-body charge.
+- Long weapons, tails, antlers, branches, banners, and wings require larger gutters or a larger final canvas. Do not shrink the character to fit a wide pose.
 
 ## Default 14-Frame Plan
 
@@ -81,7 +96,97 @@ Generate exactly four keyframes at indices 02, 05, 08, and 11. Save exact copies
 Persist `frameCount: 14`, `keyframeIndices: [2, 5, 8, 11]`, `anchorIndices: [0, 2, 5, 8, 11, 13]`, and `segmentInsertions: [1, 2, 2, 2, 1]` in `manifest.json`.
 Persist `previewBackground: "#FFFFFF"` in `manifest.json`.
 
+## Motion Library Patterns
+
+The local `motion/` library shows these practical timing patterns:
+
+- **Attacks:** usually `guard -> anticipation -> acceleration -> contact -> contact hold/follow-through -> recovery`. The contact pose should be the clearest silhouette. Attacks commonly widen to about `1.5x-1.6x` the neutral width while keeping character scale stable.
+- **Idle:** small settle/rise/settle breathing loop, usually around `5%` width/height variation.
+- **Move/walk:** contact/down/passing/up/opposite-contact, with clear feet alternation, small body bob, and stable mass.
+- **Block:** compact guard raise/hold/return, fixed feet, little scale change.
+- **Hit/suffer:** impact/recoil/squash/recovery; face and accessories can exaggerate, but identity stays locked.
+- **Death:** imbalance/fall/impact/rest; do not force the final frame to loop to neutral.
+- **Born/spawn:** small seed/egg/portal/curled silhouette unfolds into full identity; large size change is valid only for spawn-like actions.
+- **Skill/cast:** anticipation/charge/peak cast/hold/recovery; detached effects should be separate overlays unless explicitly requested in the character sheet.
+
+In every pose-sheet prompt, include the stable canvas rules:
+
+```text
+Same apparent character size in every cell.
+Same foot/bottom baseline in every cell.
+Body center stays near the same cell center except for intentional lunges.
+Complete character, weapons, horns, ears, tails, claws, and effects remain inside the cell.
+Allow the silhouette to widen for attacks, but do not scale the character smaller or larger.
+```
+
+For local post-processing, use one shared scale and one fixed foot/bottom baseline. Never auto-fit each frame independently. If a generated pose needs more horizontal or vertical room, enlarge the output canvas instead of shrinking the character.
+
+### Action Prompt Templates
+
+Use these beat templates when the user gives only a broad action request:
+
+| Action | Key pose 02 | Key pose 05 | Key pose 08 | Key pose 11 |
+|---|---|---|---|---|
+| Compact melee slash | crouch/wind up; weapon draws up/back on locked side | fastest slash/chop; clear contact silhouette | low/front follow-through; body overcommitted | weapon returns to ready guard |
+| Horn/body bash | body compresses; head/horn pulls back; side limbs brace | forward/down lunge; horn/shell/face leads | lowest compressed impact hold | body rises and re-centers |
+| Claw swipe | active claw pulls back; anchor claw visible | active claw maximum extension | torso twist and follow-through | active claw returns to guard |
+| Ground smash | body rises or fists/weapon lift overhead | hard drop to ground line | lowest squash; widest impact silhouette | heavy rebound upward |
+| Idle | settle | rise | settle | neutral loop return |
+| Move/walk | contact | down | passing/up | opposite contact |
+| Block | begin guard raise | guard silhouette readable | hold guard | return to neutral |
+| Hit/suffer | impact | recoil | squash/stretch | recovery |
+| Death | imbalance | fall | impact | rest |
+| Born/spawn | seed/egg/portal/curled shape | unfolding | nearly full form | neutral identity |
+| Skill/cast | anticipation | charge | peak cast/hold | recovery |
+
 ## Workflow
+
+### 0. Audit and Standardize the Baseline Frame
+
+For the `/img2mo-std` baseline standardization sub-skill and command reference, read [skills/img2mo-std/SKILL.md](skills/img2mo-std/SKILL.md).
+
+When the user invokes `/img2mo-std 图片名/位置`, resolve the image path, run the standardization step, and use the standardized output as the baseline for later animation generation.
+
+Before baseline analysis or any `image_gen` call, check whether the input frame is a usable animation baseline:
+
+- foreground subject longest side should be about `300-400 px`;
+- transparent or removable background should surround the subject;
+- every side should have enough action margin for walk bob, weapon arcs, hair, horns, cloak, tail, wings, or props;
+- long weapons, capes, tails, antlers, banners, and large attack silhouettes need extra horizontal/vertical margin;
+- source images much larger than this range should be standardized to reduce generation time and reduce model scale drift.
+
+Use the bundled script when the image is too large, too tight, or has a white background:
+
+```powershell
+python scripts\standardize_baseline.py sample\s7.png
+```
+
+Default output is `sample/<name>-standard.png`. Use that standardized file as the animation baseline unless the user explicitly wants to keep the original. The script trims transparent/near-white background, resizes the visible subject so its longest side is 360 px by default, preserves aspect ratio, and adds transparent margins on all sides.
+
+Useful options:
+
+```powershell
+python scripts\standardize_baseline.py sample\s7.png --subject-max 380 --margin-ratio 0.8
+python scripts\standardize_baseline.py sample\s7.png --output sample\s7-standard.png
+python scripts\standardize_baseline.py sample\s7.png --check-only
+```
+
+Treat the standardized baseline as the `00`/`13` source for validation. Keep the original file unchanged unless the user explicitly asks to overwrite it.
+
+### 0.5. Load Project Knowledge
+
+Before baseline analysis and prompt writing, check whether `img2mo-knowledge/index.md` exists.
+
+If it exists:
+
+- read `img2mo-knowledge/index.md`;
+- for the requested action type, read `img2mo-knowledge/action-patterns.md` if present;
+- for style-sensitive requests, read `img2mo-knowledge/style-patterns.md` if present;
+- before writing prompts, read `img2mo-knowledge/prompt-patterns.md` if present;
+- before validation/rejection decisions, read `img2mo-knowledge/failures.md` if present;
+- search `img2mo-knowledge/learnings.jsonl` only for matching action types, character styles, or source tags when detailed examples are useful.
+
+Use learned knowledge to improve beat choices, prompt clauses, canvas margins, style wording, and rejection checks. Do not copy old prompts blindly and do not reuse old generated output unless the user explicitly asks.
 
 ### 1. Analyze the Baseline Frame and Establish the Identity Lock
 
@@ -163,7 +268,7 @@ Generate five anchor-to-anchor segments with fixed insertion counts: 00->02 gets
 
 Repeat side locks verbatim in in-between prompts: name the active limb in screen space, require it to connect to the same shoulder in every cell, and state that the anchor limb must remain visible and stable. Even if a single frame looks plausible, shoulder-connection switching or ambiguity is a generation failure.
 
-When a single 14-frame strip is likely to be crowded, contaminated, or hard to split, do not force it. Instead, have `image_gen` generate shorter source strips, such as one `01-06` strip and one `07-12` strip. Frames 00 and 13 still use the exact baseline image. All source batches must share the same identity lock, same weaponHand/emptyHand lock, same chroma key, and same canvas/gutter constraints.
+When a single 14-frame strip is likely to be crowded, contaminated, inconsistent in scale, or hard to split, do not force it. Prefer two short four-cell source sheets: `01/03/04/06` and `07/09/10/12`. Frames 00 and 13 still use the exact baseline image, and 02/05/08/11 still come from the approved key-pose sheet. All source batches must share the same identity lock, side/topology lock, same chroma key, same apparent character size, same foot/bottom baseline, and same canvas/gutter constraints.
 
 In-betweens must be generated by `image_gen`. Never generate each frame independently. Do not accept an in-between batch that is inconsistent with the approved key poses in style or identity. Do not replace model-generated in-betweens with procedural interpolation, image warping, or copied keyframes.
 
@@ -215,6 +320,16 @@ Inspect the contact sheet and playback loop. Confirm:
 - the output directory contains only contract files; temporary sources, failed drafts, chroma-key sources, alpha sources, and debug splits have been deleted or kept outside the final directory.
 
 Correct failures and repeat both visual inspection and deterministic validation. Always inspect `contact-sheet.png` first, then `preview.gif`, then report exact output paths and evidence.
+
+### 9. Learn From Final Output
+
+When the user approves a final animation or finishes requested revisions, offer or perform a short retrospective. For durable lessons, invoke the project sub-skill `img2mo-learn` or follow its storage contract:
+
+- write output-specific notes to `output/<action-id>/retro.md` when useful;
+- append one compact JSON object to `img2mo-knowledge/learnings.jsonl`;
+- update concise project-level summaries in `img2mo-knowledge/action-patterns.md`, `style-patterns.md`, `prompt-patterns.md`, or `failures.md`.
+
+Do not write normal learning records into the installed Codex skill directory. Keep project-specific knowledge in `img2mo-knowledge/`.
 
 ## Output Contract
 
