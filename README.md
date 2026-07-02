@@ -1,5 +1,16 @@
 <div align="center">
-
+<br>
+<p align="center">
+  <img src="examples/e1res.gif" height="110" alt="claudecy idle" />
+  <img src="examples/e2res.gif" height="110" alt="claudecy running" />
+  <img src="examples/e3res.gif" height="110" alt="claudecy success" />
+  <img src="examples/e4res.gif" height="110" alt="claudecy talking" />
+  <img src="examples/e5res.gif" height="110" alt="howl idle" />
+  <img src="examples/e7res.gif" height="110" alt="howl success" />
+  <img src="examples/e6res.gif" height="110" alt="howl running" />
+</p>  
+<br>
+  
 # 2dimg2motion.skill
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -8,11 +19,13 @@
 
 <br>
 
-**2dimg2motion.skill：将一张静态 2D 角色、怪物、载具、武器或道具图片，通过 AI 图像生成转换为风格一致、透明背景、可用于游戏的动画序列帧。**
+![head](examples/github-header-1.png)
+
+**2dimg2motion.skill：将一张静态 2D 角色、怪物、载具、武器或道具图片，通过 AI 图像生成转换为风格一致、透明背景、可用于游戏的动画序列帧。**  
 
 </div>
 
----
+
 
 ## 示例
 
@@ -42,7 +55,8 @@
 
 ## 这是什么
 
-这是一个 **AI 驱动的 2D 游戏动画帧生成管线**。输入一张角色设定图，输出一套风格一致、透明背景、可直接用于游戏引擎的动画序列帧。
+这是一个 **AI 驱动的 2D 游戏动画帧生成管线**。输入一张角色设定图，输出一套风格一致、透明背景、可直接用于游戏引擎的动画序列帧。  
+
 
 它不是“给单图加动效”的补间工具，而是一套完整的**整角色关键姿势重绘流程**：先锁定角色身份特征，再生成共享关键姿势，最后以原图和关键姿势表为参考生成补间帧，尽量保持透视、遮挡、挤压拉伸与整体轮廓的连续性。
 

@@ -284,6 +284,14 @@ If splitting cells creates neighboring-cell fragments, only remove small disconn
 
 Keep all PNG frames transparent. When building `preview.gif`, composite every RGBA frame over a pure white `#FFFFFF` background. Do not use transparent, checkerboard, gray, or dark preview backgrounds.
 
+Use the repository helper to build or rebuild GIF previews from delivered full frames:
+
+```powershell
+python scripts\fullframes_to_gif.py output\<action-id>\fullframe --output output\<action-id>\preview.gif --duration-ms 75
+```
+
+Adjust `--duration-ms` when the user asks for a slower or faster preview. The GIF is a playback preview only; the transparent deliverables remain `fullframe/*.png` and `spritesheet.png`.
+
 Name full frames contiguously, for example `hero-attack_00.png` through `hero-attack_13.png`. Keyframes use the same prefix and preserve indices: `_02`, `_05`, `_08`, and `_11`.
 
 ### 7. Correct Temporal Continuity and Identity Drift

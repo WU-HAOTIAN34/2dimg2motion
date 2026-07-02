@@ -3,6 +3,11 @@ output/
 sample/
 tmp/
 img2mo-knowledge/
+assets/
+
+scripts/generate_s1_walk_from_video.py
+scripts/generate_s7_walk_from_video.py
+scripts/process_s3_arm_swing_attack.py
 
 # Local agent settings
 .claude/
